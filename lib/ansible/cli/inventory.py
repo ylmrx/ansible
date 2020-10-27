@@ -77,16 +77,18 @@ class InventoryCLI(CLI):
         action_group.add_argument("--list", action="store_true", default=False, dest='list', help='Output all hosts info, works as inventory script')
         action_group.add_argument("--host", action="store", default=None, dest='host', help='Output specific host info, works as inventory script')
         action_group.add_argument("--graph", action="store_true", default=False, dest='graph',
-                                  help='create inventory graph, if supplying pattern it must be a valid group name')
+                                  help='Create inventory graph, if supplying pattern it must be a valid group name')
+        action_group.add_argument("--dot", action="store_true", default=False, dest='graph_dot',
+                                  help='Render a Graphviz digraph of the inventory, if supplying pattern it must be a valid group name')
         self.parser.add_argument_group(action_group)
 
         # graph
         self.parser.add_argument("-y", "--yaml", action="store_true", default=False, dest='yaml',
-                                 help='Use YAML format instead of default JSON, ignored for --graph')
+                                 help='Use YAML format instead of default JSON, ignored for --graph and --dot')
         self.parser.add_argument('--toml', action='store_true', default=False, dest='toml',
-                                 help='Use TOML format instead of default JSON, ignored for --graph')
+                                 help='Use TOML format instead of default JSON, ignored for --graph and --dot]')
         self.parser.add_argument("--vars", action="store_true", default=False, dest='show_vars',
-                                 help='Add vars to graph display, ignored unless used with --graph')
+                                 help='Add vars to graph display, ignored unless used with --graph and --dot]')
 
         # list
         self.parser.add_argument("--export", action="store_true", default=C.INVENTORY_EXPORT, dest='export',
@@ -105,13 +107,13 @@ class InventoryCLI(CLI):
 
         # there can be only one! and, at least, one!
         used = 0
-        for opt in (options.list, options.host, options.graph):
+        for opt in (options.list, options.host, options.graph, options.graph_dot):
             if opt:
                 used += 1
         if used == 0:
-            raise AnsibleOptionsError("No action selected, at least one of --host, --graph or --list needs to be specified.")
+            raise AnsibleOptionsError("No action selected, at least one of --host, --graph, --dot or --list needs to be specified.")
         elif used > 1:
-            raise AnsibleOptionsError("Conflicting options used, only one of --host, --graph or --list can be used at the same time.")
+            raise AnsibleOptionsError("Conflicting options used, only one of --host, --graph, --dot or --list can be used at the same time.")
 
         # set host pattern to default if not supplied
         if options.args:
@@ -141,6 +143,8 @@ class InventoryCLI(CLI):
 
         elif context.CLIARGS['graph']:
             results = self.inventory_graph()
+        elif context.CLIARGS['graph_dot']:
+            results = self.inventory_graph_dot()
         elif context.CLIARGS['list']:
             top = self._get_group('all')
             if context.CLIARGS['yaml']:
@@ -276,6 +280,50 @@ class InventoryCLI(CLI):
             return '\n'.join(self._graph_group(start_at))
         else:
             raise AnsibleOptionsError("Pattern must be valid group name when using --graph")
+
+    def _graph_group_dot(self, group, depth=0):
+        from hashlib import sha1
+        result = [ 'digraph G {', 'node [shape=plaintext constraint=false];' ]
+        def _graph_group_dot_recurse(group, depth):
+            depth = depth + 1
+            hashed_group_name = sha1(group.name.encode()).hexdigest()
+            result = ["%s\"%s\" [label=\"%s\"];" % (' ' * depth*2, hashed_group_name, group.name)]
+            for kid in sorted(group.child_groups, key=attrgetter('name')):
+                hashed_kid_name = sha1(kid.name.encode()).hexdigest()
+                result.extend(_graph_group_dot_recurse(kid, depth))
+                new_line = "%s\"%s\" -> \"%s\" [color=\"#777777\" arrowhead=none];" % (
+                        ' ' * depth * 2, hashed_group_name, hashed_kid_name)
+                if new_line not in result:
+                    result.append(new_line)
+
+            if group.name != 'all':
+                for host in sorted(group.hosts, key=attrgetter('name')):
+                    # dot doesn't support many chars, hash IDs !
+                    hashed_host_name = sha1(host.name.encode()).hexdigest()
+                    # create host
+                    new_line = "%s\"%s\" [label=\"%s\"];" % (' ' * depth*2, hashed_host_name, host.name)
+                    result.append(new_line)
+                    # link to parent group
+                    new_line = "%s\"%s\" -> \"%s\" [color=\"#660033\"];" % (' ' * depth*2, hashed_group_name, hashed_host_name)
+                    if new_line not in result:
+                        result.append(new_line)
+            return result
+
+        result.extend(_graph_group_dot_recurse(group, depth))
+        result.append('}')
+        if context.CLIARGS['show_vars']:
+            # todo
+            raise AnsibleOptionsError("This would be graphic")
+
+        return result
+
+    def inventory_graph_dot(self):
+
+        start_at = self._get_group(context.CLIARGS['pattern'])
+        if start_at:
+            return '\n'.join(self._graph_group_dot(start_at))
+        else:
+            raise AnsibleOptionsError("Pattern must be valid group name when using --dot")
 
     def json_inventory(self, top):
 
