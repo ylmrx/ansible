@@ -293,8 +293,7 @@ class InventoryCLI(CLI):
                 result.extend(_graph_group_dot_recurse(kid, depth))
                 new_line = "%s\"%s\" -> \"%s\" [color=\"#777777\" arrowhead=none];" % (
                         ' ' * depth * 2, hashed_group_name, hashed_kid_name)
-                if new_line not in result:
-                    result.append(new_line)
+                result.append(new_line)
 
             if group.name != 'all':
                 for host in sorted(group.hosts, key=attrgetter('name')):
@@ -304,9 +303,9 @@ class InventoryCLI(CLI):
                     new_line = "%s\"%s\" [label=\"%s\"];" % (' ' * depth*2, hashed_host_name, host.name)
                     result.append(new_line)
                     # link to parent group
-                    new_line = "%s\"%s\" -> \"%s\" [color=\"#660033\"];" % (' ' * depth*2, hashed_group_name, hashed_host_name)
-                    if new_line not in result:
-                        result.append(new_line)
+                    new_line = "%s\"%s\" -> \"%s\" [color=\"#660033\"];" % (
+                            ' ' * depth*2, hashed_group_name, hashed_host_name)
+                    result.append(new_line)
             return result
 
         result.extend(_graph_group_dot_recurse(group, depth))
