@@ -9,6 +9,7 @@ import sys
 
 import argparse
 from operator import attrgetter
+from hashlib import sha1
 
 from ansible import constants as C
 from ansible import context
@@ -283,44 +284,42 @@ class InventoryCLI(CLI):
 
     def _graph_group_dot(self, group, depth=0):
         from hashlib import sha1
-        result = [ 'digraph G {', 'node [shape=plaintext constraint=false];' ]
-        def _graph_group_dot_recurse(group, depth):
-            depth = depth + 1
-            hashed_group_name = sha1(group.name.encode()).hexdigest()
-            result = ["%s\"%s\" [label=\"%s\"];" % (' ' * depth*2, hashed_group_name, group.name)]
-            for kid in sorted(group.child_groups, key=attrgetter('name')):
-                hashed_kid_name = sha1(kid.name.encode()).hexdigest()
-                result.extend(_graph_group_dot_recurse(kid, depth))
-                new_line = "%s\"%s\" -> \"%s\" [color=\"#777777\" arrowhead=none];" % (
-                        ' ' * depth * 2, hashed_group_name, hashed_kid_name)
-                result.append(new_line)
+        depth = depth + 1
+        hashed_group_name = sha1(group.name.encode()).hexdigest()
+        result = ["%s\"%s\" [label=\"%s\"];" % (' ' * depth*4, hashed_group_name, group.name)]
+        for kid in sorted(group.child_groups, key=attrgetter('name')):
+            hashed_kid_name = sha1(kid.name.encode()).hexdigest()
+            result.extend(self._graph_group_dot(kid, depth))
+            new_group = '%s"%s" -> "%s";' % (
+                    ' ' * depth*2, hashed_group_name, hashed_kid_name)
+            result.append(new_group)
 
-            if group.name != 'all':
-                for host in sorted(group.hosts, key=attrgetter('name')):
-                    # dot doesn't support many chars, hash IDs !
-                    hashed_host_name = sha1(host.name.encode()).hexdigest()
-                    # create host
-                    new_line = "%s\"%s\" [label=\"%s\"];" % (' ' * depth*2, hashed_host_name, host.name)
-                    result.append(new_line)
-                    # link to parent group
-                    new_line = "%s\"%s\" -> \"%s\" [color=\"#660033\"];" % (
-                            ' ' * depth*2, hashed_group_name, hashed_host_name)
-                    result.append(new_line)
-            return result
-
-        result.extend(_graph_group_dot_recurse(group, depth))
-        result.append('}')
-        if context.CLIARGS['show_vars']:
-            # todo
-            raise AnsibleOptionsError("This would be graphic")
-
+        if group.name != 'all':
+            for host in sorted(group.hosts, key=attrgetter('name')):
+                hashed_host_name = sha1(host.name.encode()).hexdigest()
+                new_host = '%s"%s" [label="%s"];' % (' ' * depth*4, hashed_host_name, host.name)
+                result.append(new_host)
+                new_parent_group = '%s"%s" -> "%s";' % (
+                        ' ' * depth*2, hashed_group_name, hashed_host_name)
+                result.append(new_parent_group)
         return result
 
     def inventory_graph_dot(self):
 
         start_at = self._get_group(context.CLIARGS['pattern'])
+        if context.CLIARGS['show_vars']:
+            raise AnsibleOptionsError("This would be graphic")
+
+        output = [
+                'digraph G {',
+                'graph [rankdir="LR" bgcolor="#F6F6F6"];',
+                'node [shape="record" color="#D3D3D3" style="filled" fillcolor="#AAAAAA" contraint="false"];',
+                'edge [color="#4284F3"];',
+            ]
+        output.extend(self._graph_group_dot(start_at))
+        output.append('}')
         if start_at:
-            return '\n'.join(self._graph_group_dot(start_at))
+            return '\n'.join(output)
         else:
             raise AnsibleOptionsError("Pattern must be valid group name when using --dot")
 
